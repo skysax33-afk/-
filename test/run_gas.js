@@ -10,8 +10,11 @@
  *       in.json  = { "timestamps": [ms, ...], "cases": [ { "transit": {...}, "natal": {...} }, ... ] }
  *       out.json = { "table": { aspects, group, bonus }, "natal": natalPoints_(),
  *                    "dates": [ transitAspects(), ... ], "cases": [ findAspects(), ... ] }
+ *   node test/run_gas.js --message 2026-12-01T07:00+09:00
+ *       … 指定日時の通知文（dailyMessage）を表示。日時を省略すると現在
  *
- * Step 3 以降で UrlFetchApp / PropertiesService などを使うときは、
+ * 他のテストからは require('./run_gas.js').loadGas() で GAS のコンテキストを作れる。
+ * Step 4 以降で UrlFetchApp / PropertiesService などを使うときは、
  * 下の ctx にスタブを足して Node 上で検証する。
  */
 const fs = require('fs');
@@ -65,11 +68,21 @@ function main() {
       'cases: (__input.cases || []).map((c) => findAspects(c.transit, c.natal)) })',
       ctx);
     fs.writeFileSync(a2, JSON.stringify(out));
+  } else if (mode === '--message') {
+    const date = a1 ? new Date(a1) : new Date();
+    if (isNaN(date.getTime())) {
+      console.error(`日時を読めません: ${a1}（例: 2026-12-01T07:00+09:00）`);
+      process.exit(2);
+    }
+    ctx.__date = date;
+    console.log(vm.runInContext('dailyMessage(__date)', ctx));
   } else {
     console.error('usage: node test/run_gas.js --call <fn> | --positions <in.json> <out.json>' +
-                  ' | --aspects <in.json> <out.json>');
+                  ' | --aspects <in.json> <out.json> | --message [日時]');
     process.exit(2);
   }
 }
 
-main();
+module.exports = { loadGas };
+
+if (require.main === module) main();
