@@ -15,13 +15,14 @@ const FROM = Date.UTC(1999, 11, 31, 22, 0); // 2000-01-01 07:00 JST
 const TO = Date.UTC(2059, 11, 31, 22, 0);   // 2060-01-01 07:00 JST（含まない）
 const QUANTILES = [0.1, 0.3, 0.7, 0.9];
 
-/** 毎朝のテーマ別点数 [{ 仕事: 点数, … }, …] */
-function rawScores(ctx, from, to) {
+/** 毎朝（stepDays 日おき）のテーマ別点数 [{ 仕事: 点数, … }, …] */
+function rawScores(ctx, from, to, stepDays = 1) {
   ctx.__from = from;
   ctx.__to = to;
+  ctx.__step = stepDays * 86400000;
   return vm.runInContext(
     '(() => { const natal = natalPoints_(); const out = []; ' +
-    'for (let t = __from; t < __to; t += 86400000) out.push(themeRawScores_(scoredAspects_(new Date(t), natal))); ' +
+    'for (let t = __from; t < __to; t += __step) out.push(themeRawScores_(scoredAspects_(new Date(t), natal))); ' +
     'return out; })()',
     ctx);
 }
