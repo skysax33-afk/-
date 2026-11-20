@@ -6,6 +6,10 @@
  *   node test/run_gas.js --positions in.json out.json
  *       in.json  = { "lat": 35.0, "lon": 135.7, "timestamps": [ms, ...] }
  *       out.json = [ { "p": planetPositions(), "a": angles() }, ... ]
+ *   node test/run_gas.js --aspects in.json out.json
+ *       in.json  = { "timestamps": [ms, ...], "cases": [ { "transit": {...}, "natal": {...} }, ... ] }
+ *       out.json = { "table": { aspects, group, bonus }, "natal": natalPoints_(),
+ *                    "dates": [ transitAspects(), ... ], "cases": [ findAspects(), ... ] }
  *
  * Step 3 以降で UrlFetchApp / PropertiesService などを使うときは、
  * 下の ctx にスタブを足して Node 上で検証する。
@@ -53,8 +57,17 @@ function main() {
       'return { p: planetPositions(d), a: angles(d, __input.lat, __input.lon) }; })',
       ctx);
     fs.writeFileSync(a2, JSON.stringify(out));
+  } else if (mode === '--aspects') {
+    ctx.__input = JSON.parse(fs.readFileSync(a1, 'utf8'));
+    const out = vm.runInContext(
+      '({ table: { aspects: ASPECTS, group: ORB_GROUP, bonus: NATAL_ORB_BONUS }, natal: natalPoints_(), ' +
+      'dates: (__input.timestamps || []).map((t) => transitAspects(new Date(t))), ' +
+      'cases: (__input.cases || []).map((c) => findAspects(c.transit, c.natal)) })',
+      ctx);
+    fs.writeFileSync(a2, JSON.stringify(out));
   } else {
-    console.error('usage: node test/run_gas.js --call <fn> | --positions <in.json> <out.json>');
+    console.error('usage: node test/run_gas.js --call <fn> | --positions <in.json> <out.json>' +
+                  ' | --aspects <in.json> <out.json>');
     process.exit(2);
   }
 }
