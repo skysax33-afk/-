@@ -7,7 +7,7 @@
 
 1. 前提ツールの確認: `node --version` と `python --version`（Windows。mac/Linux は `python3`）。どちらかが無ければユーザーに伝えて止まる
 2. 検証環境: `python -m pip install -r test/requirements.txt`（pyswisseph。初回のみ）
-3. `python test/compare.py` と `python test/compare_aspects.py` が全項目 OK になることを確認（＝Step 1・2 が壊れていない）
+3. `python test/compare.py`・`python test/compare_aspects.py`・`node test/test_interpret.js` が全項目 OK になることを確認（＝Step 1〜3 が壊れていない）
 4. 下の「ロードマップ」で次のStepを確認し、未確定の仕様をユーザーに聞いてから着手
 
 ## 進め方のルール
@@ -26,11 +26,14 @@ transit-bot/
 ├── src/                  # GASに載せるファイル（clasp の rootDir）
 │   ├── appsscript.json   # V8 / Asia/Tokyo
 │   ├── ephemeris.gs      # Step 1: 天体位置計算
-│   └── aspects.gs        # Step 2: アスペクト判定
+│   ├── aspects.gs        # Step 2: アスペクト判定
+│   └── interpret.gs      # Step 3: 解釈文の生成（評価＋定型文）
 └── test/
     ├── run_gas.js        # src/*.gs を Node で実行するハーネス（GAS APIはスタブ）
     ├── compare.py        # Swiss Ephemeris との精度比較テスト（Step 1）
     ├── compare_aspects.py # アスペクト判定のテスト（Step 2）
+    ├── test_interpret.js # 解釈文のテスト（Step 3）
+    ├── calibrate_stars.js # ★評価の境界を決めるスクリプト（Step 3）
     └── requirements.txt
 ```
 
@@ -115,11 +118,9 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
 - 1950〜2050年のランダム1000時点で、Swiss Ephemeris の位置に同じオーブ表を当てた結果と照合。判定・オーブ・接近/分離の不一致 0 件（位置誤差でオーブの境界・正確な角度・留にかかるものは除外）
 - わざと壊したコード（接近/分離の符号反転、0°またぎの処理を外す）が NG になることを確認済み
 
-## ロードマップ
+### Step 3 解釈文の生成 — 完了（`src/interpret.gs`）
 
-### Step 3 解釈文の生成（`src/interpret.gs`）— 次にやる
-
-確定した仕様（2026-11-20 ユーザー確認済み）:
+仕様（2026-11-20 ユーザー確認済み）:
 
 - **定型文の組み合わせ**で作る（GAS内で完結・外部APIなし）。評価（どのアスペクトを選ぶか・★）と文章化を分け、文章化だけ後から LLM に差し替えられる作りにする
 - トーン: **落ち着いた解説**（天体の意味を添えて状態を客観的に説明する）
@@ -149,9 +150,35 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
   | 体調 | ASC・火星・太陽 |
   | お金 | 金星・木星・土星 |
 
-  点数→★の境界は、多くの日付で点数の分布を取り、★★★が普通の日になるように決める
+  点数→★の境界は `test/calibrate_stars.js` で決める。2000〜2059年の毎朝7:00 JST（21915日）の分布から、下位10%=★1・〜30%=★2・〜70%=★3・〜90%=★4・上位10%=★5。
+  **出生図・オーブ・重み・テーマを変えたら `node test/calibrate_stars.js` を実行し、出力を `STAR_THRESHOLDS` に貼り直す**
 
-### Step 4 LINE送信（`src/line.gs`）
+公開関数:
+
+| 関数 | 戻り値 |
+|---|---|
+| `evaluateDay(date)` | 評価だけ（文章なし）: `{ date, stars: [{ theme, score, stars }], today, good, caution, period }`。各区分は findAspects の要素に `retro`・`category`（harmony/tension/neutral）・`score`（重要度）を足したもの。`period` の要素には `period: { start, end, peak, peakDays, openStart, openEnd }` も付く |
+| `renderMessage(ev)` | 評価 → 通知文（定型文）。**LLM に差し替えるときはこの関数だけを置き換える** |
+| `dailyMessage(date)` | `renderMessage(evaluateDay(date))` |
+| `testStep3()` | 現在時刻の通知文をログ出力 |
+
+実装上の決めごと（仕様の確認時に決めていない細部。変えたいときはユーザーに確認する）:
+- 重要度 = アスペクトの重み × (1 − オーブ/許容オーブ) × (分離中なら 0.8)。★の点数はテーマごとに「調和は＋・緊張は−」で重要度を足したもの
+- 太陽・水星の中立の合は、追い風にも注意点にも入らない（★にも影響しない）。月の中立の合は「今日の流れ」に入る
+- オーブが10′未満のときは「ほぼ正確」と書く
+- 期間は、通知と同じ時刻で1日ずつ前後に探す（最大800日。超えたら「以前」「以降」）。「最も近づく日」は期間内でオーブが最小の日。逆行で2回近づく場合は、近い方の1回だけを書く
+- 文章の部品は `TRANSIT_TEXT`（天体×調和/緊張/合）と `NATAL_TEXT`（感受点の意味と領域）。言い回しを直すときはここだけを変える
+- 1年分（2026-11-21から）の実績: 平均856字・最大924字。追い風・注意点が「目立つ配置はありません」になるのは年に2日ずつ
+
+検証（`test/test_interpret.js`、Node のみ）:
+- 文章の全3960通り（10天体×12感受点×11アスペクト×接近/分離/正確）に崩れがない
+- 分類・重要度・テーマ点数・★の境界・区分の選び方の手計算ケース
+- ★の分布が 10/20/40/20/10%（±3%）、期間の始まり・終わりがオーブの境界と一致（243件）、1年分の通知文に崩れがなく5000字以内
+- わざと壊したコード（合の分類・並び順・期間の1日ずれ・接近/分離の係数）が NG になることを確認済み
+
+## ロードマップ
+
+### Step 4 LINE送信（`src/line.gs`）— 次にやる
 
 - LINE Notify は2025年3月末で終了しているので、**Messaging API の push メッセージ**を使う
 - `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` はスクリプトプロパティに保存し、コードやリポジトリに書かない
@@ -174,12 +201,15 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
 python -m pip install -r test/requirements.txt   # 初回のみ（pyswisseph）
 python test/compare.py                           # 精度テスト（Step 1）。NGなら終了コード1
 python test/compare_aspects.py                   # アスペクト判定テスト（Step 2）。NGなら終了コード1
+node test/test_interpret.js                      # 解釈文テスト（Step 3）。NGなら終了コード1
+node test/calibrate_stars.js                     # ★の境界を取り直す（出力を interpret.gs に貼る）
 node test/run_gas.js --call testStep1            # GAS関数を Node で実行
 node test/run_gas.js --call testStep2
+node test/run_gas.js --message 2026-12-01T07:00+09:00   # 指定日時の通知文（省略で現在）
 ```
 
 - 開発PCは Windows。`python3` ではなく `python`（または `py`）を使う
-- `src/` を変えたら、まず `python test/compare.py` と `python test/compare_aspects.py` が通ることを確認する
+- `src/` を変えたら、まず `python test/compare.py`・`python test/compare_aspects.py`・`node test/test_interpret.js` が通ることを確認する
 - Node が書き出すJSONはUTF-8（天体名が日本語キー）。Python側で読むときは必ず `encoding='utf-8'` を付ける（Windowsの既定は cp932）
 
 ## デプロイ
