@@ -7,7 +7,7 @@
 
 1. 前提ツールの確認: `node --version` と `python --version`（Windows。mac/Linux は `python3`）。どちらかが無ければユーザーに伝えて止まる
 2. 検証環境: `python -m pip install -r test/requirements.txt`（pyswisseph。初回のみ）
-3. `python test/compare.py`・`python test/compare_aspects.py`・`node test/test_interpret.js` が全項目 OK になることを確認（＝Step 1〜3 が壊れていない）
+3. `python test/compare.py`・`python test/compare_aspects.py`・`node test/test_interpret.js`・`node test/test_mail.js` が全項目 OK になることを確認（＝Step 1〜4 が壊れていない）
 4. 下の「ロードマップ」で次のStepを確認し、未確定の仕様をユーザーに聞いてから着手
 
 ## 進め方のルール
@@ -27,13 +27,15 @@ transit-bot/
 │   ├── appsscript.json   # V8 / Asia/Tokyo
 │   ├── ephemeris.gs      # Step 1: 天体位置計算
 │   ├── aspects.gs        # Step 2: アスペクト判定
-│   └── interpret.gs      # Step 3: 解釈文の生成（評価＋定型文）
+│   ├── interpret.gs      # Step 3: 解釈文の生成（評価＋定型文）
+│   └── mail.gs           # Step 4: メール送信（HTML＋テキスト）
 └── test/
     ├── run_gas.js        # src/*.gs を Node で実行するハーネス（GAS APIはスタブ）
     ├── compare.py        # Swiss Ephemeris との精度比較テスト（Step 1）
     ├── compare_aspects.py # アスペクト判定のテスト（Step 2）
     ├── test_interpret.js # 解釈文のテスト（Step 3）
     ├── calibrate_stars.js # ★評価の境界を決めるスクリプト（Step 3）
+    ├── test_mail.js      # メール送信のテスト（Step 4）
     └── requirements.txt
 ```
 
@@ -176,11 +178,9 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
 - ★の分布が 10/20/40/20/10%（±3%）、期間の始まり・終わりがオーブの境界と一致（243件）、1年分の通知文に崩れがなく5000字以内
 - わざと壊したコード（合の分類・並び順・期間の1日ずれ・接近/分離の係数）が NG になることを確認済み
 
-## ロードマップ
+### Step 4 メール送信 — 完了（`src/mail.gs`）※ GAS 上での実送信は未確認
 
-### Step 4 メール送信（`src/mail.gs`）— 次にやる
-
-確定した仕様（2026-11-21 ユーザー確認済み。LINE はチャネル作成・トークン管理が手間なのでメールに変更）:
+仕様（2026-11-21 ユーザー確認済み。LINE はチャネル作成・トークン管理が手間なのでメールに変更）:
 
 - GAS の `MailApp.sendEmail` で送る（外部APIなし）
 - 宛先: スクリプトを動かす自分の Google アカウントのアドレス（`Session.getEffectiveUser().getEmail()`）。**アドレスはコードやリポジトリに書かない**
@@ -189,14 +189,38 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
 - 送信上限: 無料の Gmail アカウントは1日100通（Workspace は1500通）。1日1通なので余裕あり（2026-11-21 に公式の Quotas ページで確認）
 - 検証: `run_gas.js` に `MailApp` / `Session` のスタブを足し、件名・本文・HTML を Node 上で確かめてから実送信する
 
+公開関数:
+
+| 関数 | 内容 |
+|---|---|
+| `sendDailyMail(date)` | その日の通知メールを自分のアドレスへ送り、`{ to, subject }` を返す。`date` が Date でないとき（省略・トリガーのイベントオブジェクト）は現在時刻。宛先が取れなければ送らずにエラー |
+| `testStep4()` | 実際に自分宛てに1通送り、件名と今日の残り送信可能数をログ出力 |
+
+- 非公開: `mailSubject_`（件名）、`mailHtml_` / `itemHtml_` / `itemTitleParts_`（HTML 版）、`escapeHtml_`、`isDate_`
+- HTML 版は `evaluateDay` の評価から組み立てる（テキスト版の `renderMessage` とは別）。各アスペクトは「火星 → 出生の月　調和的な120°（トライン）・接近中」の見出し＋意味（行動力・意欲 × 感情・安心感）＋期間＋解説文。スタイルはメールアプリで崩れにくいようにすべてインライン
+- 見出しは3つのまとまり（天体 → 感受点／角度／接近・分離）ごとに `white-space:nowrap` にして、スマホ幅でもまとまりの途中で折り返さないようにした
+- 将来 `renderMessage` を LLM に差し替えたら、HTML 版も合わせて見直す（HTML 版は定型文の `itemText_` を使っている）
+- 1年分（2026-11-21から）の実績: HTML は最大5.9KB（Gmail が本文を省略する102KBより十分小さい）、件名は最大32字
+
+検証（`test/test_mail.js`、Node のみ・実際には送らない）:
+- 1回で1通、宛先は Session のアドレス、テキスト版は `dailyMessage` と同じ
+- 件名の日付・曜日は JST、★の要約は評価と一致
+- HTML: 見出し・件数・★の数・色（調和=青・緊張=赤）・エスケープ・タグの対応
+- トリガーのイベントオブジェクトや引数なしでも現在時刻で送る、宛先が取れないときは送らない
+- わざと壊したコード（イベントオブジェクト対策・枠の色・宛先チェック・件名の短い名前・テキスト版）が NG になることを確認済み
+
+**残っていること**: GAS エディタで `testStep4` を実行し、実際に届くこと・Gmail での見た目・スマホの通知を確認する。初回はメール送信とメールアドレス取得の承認を求められる
+
+## ロードマップ
+
 ### （将来）LINE送信
 
 - 必要になったら追加する。LINE Notify は2025年3月末で終了しているので、使うなら Messaging API の push メッセージ
 - トークンとユーザーIDはスクリプトプロパティに保存し、コードやリポジトリに書かない。無料プランの送信上限は着手時に確認する
 
-### Step 5 定期実行（`src/main.gs`）
+### Step 5 定期実行（`src/main.gs`）— 次にやる
 
-- 時間主導型トリガーで毎朝実行（時刻は未定、仮に7:00 JST）
+- 時間主導型トリガーで毎朝 `sendDailyMail` を実行（時刻は未定、仮に7:00 JST）。トリガーはイベントオブジェクトを渡すが、`sendDailyMail` は現在時刻として扱う
 - トリガー設定用の関数（`setupTrigger()` など）を用意し、二重登録を防ぐ
 
 ### 未定事項
@@ -211,17 +235,20 @@ python -m pip install -r test/requirements.txt   # 初回のみ（pyswisseph）
 python test/compare.py                           # 精度テスト（Step 1）。NGなら終了コード1
 python test/compare_aspects.py                   # アスペクト判定テスト（Step 2）。NGなら終了コード1
 node test/test_interpret.js                      # 解釈文テスト（Step 3）。NGなら終了コード1
+node test/test_mail.js                           # メール送信テスト（Step 4・実際には送らない）。NGなら終了コード1
 node test/calibrate_stars.js                     # ★の境界を取り直す（出力を interpret.gs に貼る）
 node test/run_gas.js --call testStep1            # GAS関数を Node で実行
 node test/run_gas.js --call testStep2
 node test/run_gas.js --message 2026-12-01T07:00+09:00   # 指定日時の通知文（省略で現在）
+node test/run_gas.js --mail 2026-12-01T07:00+09:00      # 件名・本文を表示し、HTML 版を test/mail_preview.tmp.html に書き出す（送らない）
 ```
 
 - 開発PCは Windows。`python3` ではなく `python`（または `py`）を使う
-- `src/` を変えたら、まず `python test/compare.py`・`python test/compare_aspects.py`・`node test/test_interpret.js` が通ることを確認する
+- `src/` を変えたら、まず `python test/compare.py`・`python test/compare_aspects.py`・`node test/test_interpret.js`・`node test/test_mail.js` が通ることを確認する
 - Node が書き出すJSONはUTF-8（天体名が日本語キー）。Python側で読むときは必ず `encoding='utf-8'` を付ける（Windowsの既定は cp932）
 
 ## デプロイ
 
 - 手動: GASエディタで新規プロジェクトを作り、`src/*.gs` を同名ファイルとして貼る。プロジェクトのタイムゾーンは Asia/Tokyo
+- メール送信（Step 4〜）を使う関数を初めて実行すると、承認画面が出る（メールの送信・メールアドレスの参照）。「このアプリは Google で確認されていません」と出たら「詳細」→「（プロジェクト名）に移動」で自分のスクリプトを許可する
 - clasp（任意）: `.clasp.json.example` を `.clasp.json` にコピーして scriptId を入れ、`clasp push`。`.clasp.json` は git に入れない
