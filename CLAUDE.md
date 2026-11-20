@@ -7,7 +7,7 @@
 
 1. 前提ツールの確認: `node --version` と `python --version`（Windows。mac/Linux は `python3`）。どちらかが無ければユーザーに伝えて止まる
 2. 検証環境: `python -m pip install -r test/requirements.txt`（pyswisseph。初回のみ）
-3. `python test/compare.py` が全項目 OK になることを確認（＝Step 1 が壊れていない）
+3. `python test/compare.py` と `python test/compare_aspects.py` が全項目 OK になることを確認（＝Step 1・2 が壊れていない）
 4. 下の「ロードマップ」で次のStepを確認し、未確定の仕様をユーザーに聞いてから着手
 
 ## 進め方のルール
@@ -25,15 +25,18 @@ transit-bot/
 ├── .clasp.json.example   # clasp を使う場合にコピーして scriptId を入れる
 ├── src/                  # GASに載せるファイル（clasp の rootDir）
 │   ├── appsscript.json   # V8 / Asia/Tokyo
-│   └── ephemeris.gs      # Step 1: 天体位置計算
+│   ├── ephemeris.gs      # Step 1: 天体位置計算
+│   └── aspects.gs        # Step 2: アスペクト判定
 └── test/
     ├── run_gas.js        # src/*.gs を Node で実行するハーネス（GAS APIはスタブ）
-    ├── compare.py        # Swiss Ephemeris との精度比較テスト
+    ├── compare.py        # Swiss Ephemeris との精度比較テスト（Step 1）
+    ├── compare_aspects.py # アスペクト判定のテスト（Step 2）
     └── requirements.txt
 ```
 
 GASは全 `.gs` が同じグローバルスコープを共有する。ファイル間で関数名・定数名を衝突させないこと。
 非公開ヘルパーは末尾 `_`（例: `dayNumber_`）。GASの実行メニューに出さないための慣習。
+他ファイルの定数・関数は**トップレベルで参照せず、関数の中でだけ使う**（ファイルの読み込み順に依存させない。`run_gas.js` はファイル名順に読むので `aspects.gs` が `ephemeris.gs` より先になる）。
 
 ## 現状
 
@@ -73,29 +76,48 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
 - ハウスはASC/MCだけ。ハウスシステム（プラシーダス等）は未実装
 - 月は1時間に約0.5°動くので、アスペクト判定は通知時刻を基準に計算する
 
+### Step 2 アスペクト判定 — 完了（`src/aspects.gs`）
+
+判定対象: トランジット10天体 × 出生図（10天体＋ASC＋MC）。仕様は 2026-11-20 にユーザー確認済み。
+
+- アスペクト11種: メジャー 0°・60°・90°・120°・180°、マイナー 30°・45°・135°・150°、クインタイル系 72°・144°
+- オーブ（度）はトランジット天体のグループ × アスペクトで決める（広め案）:
+
+  | アスペクト | 月 | 太陽〜火星 | 木星〜冥王星 |
+  |---|---|---|---|
+  | 0° / 180° | 5 | 2.5 | 1.5 |
+  | 90° / 120° | 5 | 2.5 | 1.5 |
+  | 60° | 3 | 2 | 1 |
+  | 150° | 2 | 1.5 | 1 |
+  | 30° / 45° / 135° | 1.5 | 1 | 0.5 |
+  | 72° / 144° | 1.5 | 1 | 0.5 |
+
+- 出生図側が 太陽・月・ASC・MC のときは、上の値に **+0.5°**
+- 値を変えるときは `aspects.gs` の `ASPECTS` / `ORB_GROUP` / `NATAL_ORB_BONUS` だけを直す（テストはこの表を GAS から読み込むので、テスト側の修正は不要）。表を変えたらこの節も更新する
+- 隣り合うアスペクト（135°/144°/150° など）のオーブは重ならない。重なる表にした場合は、オーブの小さい方を採る
+
+公開関数:
+
+| 関数 | 戻り値 |
+|---|---|
+| `findAspects(transit, natal)` | `[{ transit, natal, aspect, angle, orb, applying }]`（オーブの小さい順）。transit は `planetPositions()` の戻り値、natal は `{ 太陽: 黄経, …, ASC, MC }` |
+| `transitAspects(date)` | 指定日時のトランジット × 出生図で `findAspects` を実行 |
+| `formatOrb(orb)` | `"1°05'"` 形式の文字列 |
+| `testStep2()` | 現在のトランジット × 出生図のアスペクトをログ出力 |
+
+- `orb` は正確な角度からのずれ（度・0以上）、`aspect` はカタカナ名（コンジャンクション、スクエア など）
+- `applying`（true=接近 / false=分離）は、出生図が動かないのでトランジット天体の速度の符号だけで決まる。ちょうど正確な角度（オーブ0）のときは false
+- 非公開: `natalPoints_()`（出生図の12感受点）、`orbLimit_()`（許容オーブ）
+- 件数の目安: 1時点あたり平均約20件（Swiss Ephemeris 照合の1000時点平均）
+
+検証（`test/compare_aspects.py`）:
+- 手計算ケース8件（接近/分離・0°またぎ・+0.5°の有無・オーブ外 など）
+- 1950〜2050年のランダム1000時点で、Swiss Ephemeris の位置に同じオーブ表を当てた結果と照合。判定・オーブ・接近/分離の不一致 0 件（位置誤差でオーブの境界・正確な角度・留にかかるものは除外）
+- わざと壊したコード（接近/分離の符号反転、0°またぎの処理を外す）が NG になることを確認済み
+
 ## ロードマップ
 
-### Step 2 アスペクト判定（`src/aspects.gs`）— 次にやる
-
-- 判定対象: トランジット10天体 × 出生図（10天体＋ASC＋MC）
-- 確定した仕様（2026-11-20 ユーザー確認済み）:
-  - アスペクト11種: メジャー 0°・60°・90°・120°・180°、マイナー 30°・45°・135°・150°、クインタイル系 72°・144°
-  - オーブ（度）はトランジット天体のグループ × アスペクトで決める（広め案）:
-
-    | アスペクト | 月 | 太陽〜火星 | 木星〜冥王星 |
-    |---|---|---|---|
-    | 0° / 180° | 5 | 2.5 | 1.5 |
-    | 90° / 120° | 5 | 2.5 | 1.5 |
-    | 60° | 3 | 2 | 1 |
-    | 150° | 2 | 1.5 | 1 |
-    | 30° / 45° / 135° | 1.5 | 1 | 0.5 |
-    | 72° / 144° | 1.5 | 1 | 0.5 |
-
-  - 出生図側が 太陽・月・ASC・MC のときは、上の値に **+0.5°**
-- 出力イメージ: `[{ transit, natal, aspect, orb, applying }]`（applying は speed から接近か分離かを判定）
-- 検証: 既知の日付で手計算（または Swiss Ephemeris）と照合するテストを `test/` に足す
-
-### Step 3 LINE送信（`src/line.gs`）
+### Step 3 LINE送信（`src/line.gs`）— 次にやる
 
 - LINE Notify は2025年3月末で終了しているので、**Messaging API の push メッセージ**を使う
 - `LINE_CHANNEL_ACCESS_TOKEN` と `LINE_USER_ID` はスクリプトプロパティに保存し、コードやリポジトリに書かない
@@ -116,12 +138,14 @@ GASは全 `.gs` が同じグローバルスコープを共有する。ファイ�
 
 ```bash
 python -m pip install -r test/requirements.txt   # 初回のみ（pyswisseph）
-python test/compare.py                           # 精度テスト。NGなら終了コード1
+python test/compare.py                           # 精度テスト（Step 1）。NGなら終了コード1
+python test/compare_aspects.py                   # アスペクト判定テスト（Step 2）。NGなら終了コード1
 node test/run_gas.js --call testStep1            # GAS関数を Node で実行
+node test/run_gas.js --call testStep2
 ```
 
 - 開発PCは Windows。`python3` ではなく `python`（または `py`）を使う
-- `src/` を変えたら、まず `python test/compare.py` が通ることを確認する
+- `src/` を変えたら、まず `python test/compare.py` と `python test/compare_aspects.py` が通ることを確認する
 - Node が書き出すJSONはUTF-8（天体名が日本語キー）。Python側で読むときは必ず `encoding='utf-8'` を付ける（Windowsの既定は cp932）
 
 ## デプロイ
