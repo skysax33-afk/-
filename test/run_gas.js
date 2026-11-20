@@ -12,10 +12,12 @@
  *                    "dates": [ transitAspects(), ... ], "cases": [ findAspects(), ... ] }
  *   node test/run_gas.js --message 2026-12-01T07:00+09:00
  *       … 指定日時の通知文（dailyMessage）を表示。日時を省略すると現在
+ *   node test/run_gas.js --mail [日時] [出力.html]
+ *       … sendDailyMail をスタブで実行（実際には送らない）。件名・テキスト版を表示し、
+ *         HTML 版をファイルに書き出す（省略時 test/mail_preview.tmp.html。ブラウザで開いて確認）
  *
  * 他のテストからは require('./run_gas.js').loadGas() で GAS のコンテキストを作れる。
- * Step 4 以降で UrlFetchApp / PropertiesService などを使うときは、
- * 下の ctx にスタブを足して Node 上で検証する。
+ * GAS のサービスは下の ctx のスタブで置き換える（MailApp は送らずに ctx.__sent に記録する）。
  */
 const fs = require('fs');
 const path = require('path');
@@ -33,11 +35,21 @@ function formatDate(date, tz, fmt) {
             .replace('HH', p.hour).replace('mm', p.minute).replace('ss', p.second);
 }
 
+// スタブの送信先（実在しないアドレス）
+const STUB_EMAIL = 'me@example.com';
+
 function loadGas() {
+  const sent = [];
   const ctx = {
     console,
     Logger: { log: (...args) => console.log(...args) },
     Utilities: { formatDate },
+    MailApp: {
+      sendEmail: (to, subject, body, options) => { sent.push({ to, subject, body, options }); },
+      getRemainingDailyQuota: () => 100 - sent.length,
+    },
+    Session: { getEffectiveUser: () => ({ getEmail: () => STUB_EMAIL }) },
+    __sent: sent,
   };
   vm.createContext(ctx);
   const files = fs.readdirSync(SRC).filter((f) => f.endsWith('.gs')).sort();
@@ -76,13 +88,27 @@ function main() {
     }
     ctx.__date = date;
     console.log(vm.runInContext('dailyMessage(__date)', ctx));
+  } else if (mode === '--mail') {
+    const date = a1 ? new Date(a1) : new Date();
+    if (isNaN(date.getTime())) {
+      console.error(`日時を読めません: ${a1}（例: 2026-12-01T07:00+09:00）`);
+      process.exit(2);
+    }
+    ctx.__date = date;
+    vm.runInContext('sendDailyMail(__date)', ctx);
+    const mail = ctx.__sent[0];
+    const out = a2 || path.join(__dirname, 'mail_preview.tmp.html');
+    fs.writeFileSync(out, `<!doctype html><meta charset="utf-8"><title>${mail.subject}</title>\n${mail.options.htmlBody}\n`);
+    console.log(`宛先: ${mail.to}（スタブ）\n差出人名: ${mail.options.name}\n件名: ${mail.subject}\n`);
+    console.log(mail.body);
+    console.log(`\nHTML 版: ${out}`);
   } else {
     console.error('usage: node test/run_gas.js --call <fn> | --positions <in.json> <out.json>' +
-                  ' | --aspects <in.json> <out.json> | --message [日時]');
+                  ' | --aspects <in.json> <out.json> | --message [日時] | --mail [日時] [出力.html]');
     process.exit(2);
   }
 }
 
-module.exports = { loadGas };
+module.exports = { loadGas, STUB_EMAIL };
 
 if (require.main === module) main();
