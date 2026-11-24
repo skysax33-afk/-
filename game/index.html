@@ -636,17 +636,27 @@ function flowDir(e) {
 const flowAt = e => map.flow[Math.floor(e.y / TILE) * map.W + Math.floor(e.x / TILE)];
 
 // ================= 敵 =================
+const ZONES = [
+  { name: '崩れた坑道', floor: ['#1d1915', '#201b17', '#1a1612', '#221d18'], top: '#2e2620', front: '#17120e', edge: '#45382c' },
+  { name: '水没した聖堂', floor: ['#12201f', '#142423', '#101c1b', '#162726'], top: '#1f3331', front: '#0c1716', edge: '#2f4d48' },
+  { name: '灯の奥底', floor: ['#1a1020', '#1d1224', '#170d1c', '#201427'], top: '#2a1830', front: '#120914', edge: '#4a2238' },
+];
+const zoneForFloor = f => 1 + Math.floor((f - 1) / 10) % ZONES.length;
 const ETYPES = {
-  slime:  { name: '灰泥',       r: 15, hp: 24,  dmg: 8,  spd: 72,  xp: 4,  ai: 'melee',   from: 1, w: () => 60 },
-  bat:    { name: '骨蝙蝠',     r: 11, hp: 13,  dmg: 5,  spd: 170, xp: 3,  ai: 'flutter', from: 1, w: () => 40 },
-  ghoul:  { name: '坑道の亡者', r: 16, hp: 42,  dmg: 13, spd: 98,  xp: 7,  ai: 'windup',  from: 2, w: () => 35 },
-  caster: { name: '灯喰い',     r: 14, hp: 28,  dmg: 11, spd: 82,  xp: 8,  ai: 'ranged',  from: 3, w: () => 28 },
-  brute:  { name: '岩殻',       r: 24, hp: 110, dmg: 20, spd: 56,  xp: 16, ai: 'charge',  from: 4, w: f => Math.min(30, 10 + f) },
+  slime:  { name: '灰泥',       r: 15, hp: 24,  dmg: 8,  spd: 72,  xp: 4,  ai: 'melee',   zone: 1, from: 1, w: () => 60 },
+  bat:    { name: '骨蝙蝠',     r: 11, hp: 13,  dmg: 5,  spd: 170, xp: 3,  ai: 'flutter', zone: 1, from: 1, w: () => 40 },
+  ghoul:  { name: '坑道の亡者', r: 16, hp: 42,  dmg: 13, spd: 98,  xp: 7,  ai: 'windup',  zone: 1, from: 2, w: () => 35 },
+  caster: { name: '灯喰い',     r: 14, hp: 28,  dmg: 11, spd: 82,  xp: 8,  ai: 'ranged',  zone: 1, from: 3, w: () => 28 },
+  brute:  { name: '岩殻',       r: 24, hp: 110, dmg: 20, spd: 56,  xp: 16, ai: 'charge',  zone: 1, from: 4, w: f => Math.min(30, 10 + f) },
+  beetle: { name: '火薬虫',     r: 13, hp: 16,  dmg: 22, spd: 125, xp: 5,  ai: 'beetle',  zone: 1, from: 6, w: () => 20 },
 };
 const BOSSES = [
-  { key: 'golem',  name: '岩殻の王 ドルグ',     r: 46, hp: 950, dmg: 24, spd: 70,  xp: 120 },
-  { key: 'mother', name: '灯喰いの母 ネルヴァ', r: 36, hp: 800, dmg: 18, spd: 95,  xp: 130 },
-  { key: 'fallen', name: '堕ちた灯守り',        r: 26, hp: 880, dmg: 22, spd: 150, xp: 140 },
+  { key: 'golem',      name: '岩殻の王 ドルグ',     r: 46, hp: 950,  dmg: 24, spd: 70,  xp: 120 },
+  { key: 'mother',     name: '灯喰いの母 ネルヴァ', r: 36, hp: 800,  dmg: 18, spd: 95,  xp: 130 },
+  { key: 'crab',       name: '沈鐘の巨蟹',         r: 50, hp: 1000, dmg: 26, spd: 80,  xp: 150, moveset: 'golem' },
+  { key: 'archbishop', name: '溺れた大司教',       r: 36, hp: 900,  dmg: 22, spd: 90,  xp: 160, moveset: 'mother' },
+  { key: 'fallen',     name: '堕ちた灯守り',       r: 26, hp: 880,  dmg: 22, spd: 150, xp: 140 },
+  { key: 'dark',       name: '灯を呑むもの',       r: 56, hp: 1300, dmg: 28, spd: 60,  xp: 200, moveset: 'fallen' },
 ];
 const hpMul = f => Math.pow(1.16, f - 1);
 const dmgMul = f => Math.pow(1.10, f - 1);
@@ -661,12 +671,19 @@ function makeEnemy(type, x, y, f, elite = false) {
   return e;
 }
 function makeBoss(f, x, y) {
-  const tier = f / 5, b = BOSSES[(tier - 1) % 3], loop = 1 + 0.3 * Math.floor((tier - 1) / 3);
+  const tier = f / 5 - 1;
+  const b = BOSSES[tier % BOSSES.length], loop = 1 + 0.3 * Math.floor(tier / BOSSES.length);
   const e = makeEnemy('brute', x, y, f, false);
-  Object.assign(e, { type: b.key, name: b.name, ai: 'boss', boss: true, r: b.r, hp: b.hp * hpMul(f) * loop, dmg: b.dmg * dmgMul(f) * loop,
+  Object.assign(e, { type: b.key, moveset: b.moveset ?? b.key, name: b.name, ai: 'boss', boss: true, r: b.r, hp: b.hp * hpMul(f) * loop, dmg: b.dmg * dmgMul(f) * loop,
     spd: b.spd, xp: b.xp * xpMul(f), state: 'sleep', cd: 1.2, phase: 1, pat: 0 });
   e.maxHp = e.hp;
   return e;
+}
+function floorEnemyTypes(f) {
+  const entries = Object.entries(ETYPES), zone = zoneForFloor(f);
+  let pool = f > 30 ? entries : entries.filter(([, d]) => d.zone === zone && f >= d.from);
+  if (!pool.length) pool = entries.filter(([, d]) => d.zone === 1 && f >= d.from);
+  return pool.map(([k, d]) => ({ k, w: d.w(f) }));
 }
 function spawnFloorEnemies(f) {
   const list = [];
@@ -676,7 +693,7 @@ function spawnFloorEnemies(f) {
     return list;
   }
   const total = Math.min(10 + f * 2, 34);
-  const types = Object.entries(ETYPES).filter(([, d]) => f >= d.from).map(([k, d]) => ({ k, w: d.w(f) }));
+  const types = floorEnemyTypes(f);
   const rooms = map.rooms.slice(1);
   const eliteChance = Math.min(0.2, 0.06 + f * 0.006);
   let guard = 0;
@@ -757,7 +774,8 @@ function startFloor() {
   lastRevealT = -1;
   revealAround();
   miniDirty = true;
-  showBanner(`地下 ${run.floor}階`, map.boss ? 'この階には主がいる' : (run.floor === 1 ? '階段を探して、さらに下へ' : ''));
+  const subtitle = run.floor % 10 === 1 ? ZONES[zoneForFloor(run.floor) - 1].name : map.boss ? 'この階には主がいる' : '';
+  showBanner(`地下 ${run.floor}階`, subtitle);
   updateHud(true);
 }
 let bossRef = null, bossAwake = false;
@@ -821,6 +839,7 @@ function explodeAt(x, y, radius, mult, color = '#ff9a4a') {
   shake = Math.max(shake, 5);
 }
 function killEnemy(e) {
+  if (e.fuse) e.fuse.cancelled = true;
   run.kills++; meta.kills++;
   const sb = 1 + player.stats.shard;
   const sh = Math.round((e.boss ? 40 * (run.floor / 5) : e.elite ? 5 : 1) * sb);
@@ -949,6 +968,7 @@ function updateEnemies(dt) {
   for (const e of enemies) {
     if (e.hp <= 0) continue;
     e.flash = Math.max(0, e.flash - dt); e.touchCd -= dt; e.cd -= dt; e.st -= dt; e.wob += dt * 4;
+    if (e.fuse) continue;
     if (e.kx || e.ky) {
       moveSafe(e, e.kx * dt, e.ky * dt);
       const k = Math.pow(0.0008, dt); e.kx *= k; e.ky *= k;
@@ -976,6 +996,14 @@ function updateEnemies(dt) {
       case 'flutter':
         step(e, chase + Math.sin(e.wob * 1.7) * (d > 60 ? 0.9 : 0.3), e.spd * dt);
         contact(e); break;
+      case 'beetle':
+        if (d <= 70) {
+          e.fuse = circleHazard(e.x, e.y, 80, 0.9, e.dmg, () => {
+            e.hp = 0;
+            burst(e.x, e.y, 22, '#ff9a4a', 280);
+          });
+        } else step(e, chase, e.spd * dt);
+        break;
       case 'windup':
         if (e.state === 'wind') {
           if (e.st <= 0) {
@@ -1021,14 +1049,15 @@ function updateEnemies(dt) {
       const dx = b.x - a.x, dy = b.y - a.y, m = a.r + b.r, d2 = dx * dx + dy * dy;
       if (d2 < m * m && d2 > 0.01) {
         const d = Math.sqrt(d2), push = (m - d) / 2, nx = dx / d, ny = dy / d;
-        const wa = a.boss ? 0 : b.boss ? 2 : 1, wb = b.boss ? 0 : a.boss ? 2 : 1;
+        const fixedA = a.boss || a.fuse, fixedB = b.boss || b.fuse;
+        const wa = fixedA ? 0 : fixedB ? 2 : 1, wb = fixedB ? 0 : fixedA ? 2 : 1;
         moveEnt(a, -nx * push * wa, -ny * push * wa); moveEnt(b, nx * push * wb, ny * push * wb);
       }
     }
     const dx = a.x - player.x, dy = a.y - player.y, m = a.r + player.r, d2 = dx * dx + dy * dy;
     if (d2 < m * m && d2 > 0.01) {
       const d = Math.sqrt(d2), push = m - d;
-      if (a.boss) moveEnt(player, -dx / d * push, -dy / d * push); else moveEnt(a, dx / d * push, dy / d * push);
+      if (a.boss || a.fuse) moveEnt(player, -dx / d * push, -dy / d * push); else moveEnt(a, dx / d * push, dy / d * push);
     }
   }
 }
@@ -1051,7 +1080,7 @@ function updateBoss(e, dt) {
   if (e.phase === 1 && e.hp < e.maxHp * 0.5) { e.phase = 2; showBanner('主が怒り狂った', '攻撃が激しくなる'); shake = 10; }
   const d = Math.sqrt(dist2(e, player)), a = angTo(e, player), P2 = e.phase === 2;
   if (e.state === 'walk') {
-    if (e.type === 'mother') {
+    if (e.moveset === 'mother') {
       if (d < 200) step(e, a + Math.PI, e.spd * dt);
       else if (d > 320) step(e, a, e.spd * dt);
       else step(e, a + Math.PI / 2 * (Math.sin(e.wob * 0.25) > 0 ? 1 : -1), e.spd * 0.6 * dt);
@@ -1080,10 +1109,14 @@ function bossAim(e, v, t, wind) {
   hazards.push({ k: 'line', x: e.x, y: e.y, a: e.ang, len: v * t, w: e.r * 2, t: 0, max: wind });
 }
 function bossSeq(e, list) { e.state = 'seq'; e.seqT = 0; e.seq = list.sort((p, q) => p.t - q.t); }
-function circleHazard(x, y, r, delay, dmg) { hazards.push({ k: 'circle', x, y, r, t: 0, max: delay, dmg }); }
+function circleHazard(x, y, r, delay, dmg, onExpire) {
+  const h = { k: 'circle', x, y, r, t: 0, max: delay, dmg, onExpire };
+  hazards.push(h);
+  return h;
+}
 function bossNextPattern(e) {
   const P2 = e.phase === 2;
-  const pats = { golem: ['charge', 'slam', 'summon', 'slam', 'charge'], mother: ['radial', 'aimed', 'summon', 'blink', 'aimed'], fallen: ['dash', 'spin', 'orbs', 'dash', 'spin'] }[e.type];
+  const pats = { golem: ['charge', 'slam', 'summon', 'slam', 'charge'], mother: ['radial', 'aimed', 'summon', 'blink', 'aimed'], fallen: ['dash', 'spin', 'orbs', 'dash', 'spin'] }[e.moveset];
   const p = pats[e.pat++ % pats.length];
   const L = [];
   if (p === 'charge') { bossAim(e, 560, 0.7, 0.8); e.chain = P2 ? 2 : 0; return; }
@@ -1094,11 +1127,12 @@ function bossNextPattern(e) {
     L.push({ t: n * 0.28 + 0.9, fn: () => { } });
   } else if (p === 'summon') {
     L.push({ t: 0.5, fn: () => {
-      const n = Math.max(0, Math.min(e.type === 'golem' ? 3 : 4, 7 - minionCount()));
+      const golem = e.moveset === 'golem';
+      const n = Math.max(0, Math.min(golem ? 3 : 4, 7 - minionCount()));
       for (let i = 0; i < n; i++) {
         const ang = TAU * i / n, x = e.x + Math.cos(ang) * (e.r + 30), y = e.y + Math.sin(ang) * (e.r + 30);
         if (isWallP(x, y)) continue;
-        const m = makeEnemy(e.type === 'golem' ? 'slime' : 'bat', x, y, run.floor, false);
+        const m = makeEnemy(golem ? 'slime' : 'bat', x, y, run.floor, false);
         m.minion = true; m.aggro = true; m.xp *= 0.3; enemies.push(m);
         burst(x, y, 8, '#9b8bb0', 150);
       }
@@ -1153,15 +1187,17 @@ function updateShots(dt) {
 }
 function updateHazards(dt) {
   for (const h of hazards) {
+    if (h.cancelled) continue;
     h.t += dt;
     if (h.k === 'circle' && !h.done && h.t >= h.max) {
       h.done = true;
+      h.onExpire?.();
       fx.push({ k: 'ring', x: h.x, y: h.y, r: h.r, t: 0, max: 0.3, color: '#ff7a6b' });
       burst(h.x, h.y, 10, '#d6a08a', 220); shake = Math.max(shake, 5);
       if ((player.x - h.x) ** 2 + (player.y - h.y) ** 2 < (h.r + player.r * 0.5) ** 2) damagePlayer(h.dmg, h.x, h.y);
     }
   }
-  hazards = hazards.filter(h => h.t < h.max + (h.k === 'circle' ? 0.05 : 0));
+  hazards = hazards.filter(h => !h.cancelled && h.t < h.max + (h.k === 'circle' ? 0.05 : 0));
 }
 let bagFullToastT = 0;
 function updateDrops(dt) {
@@ -1258,21 +1294,20 @@ function resize() {
 window.addEventListener('resize', resize);
 function screenToWorld(sx, sy) { return { x: camX + (sx - VW / 2) / ZOOM, y: camY + (sy - VH / 2) / ZOOM }; }
 function thash(x, y) { let h = (x * 374761393 + y * 668265263 + map.seed) | 0; h = Math.imul(h ^ (h >>> 13), 1274126177); return (h ^ (h >>> 16)) >>> 0; }
-const FLOORC = ['#1b1821', '#1d1a24', '#19161e', '#1f1b26'];
 const FONT_NUM = '"Dela Gothic One", "Hiragino Kaku Gothic StdN", sans-serif';
 
 function drawTiles() {
   const hw = VW / 2 / ZOOM, hh = VH / 2 / ZOOM;
   const x0 = Math.max(0, Math.floor((camX - hw) / TILE) - 1), x1 = Math.min(map.W - 1, Math.floor((camX + hw) / TILE) + 1);
   const y0 = Math.max(0, Math.floor((camY - hh) / TILE) - 1), y1 = Math.min(map.H - 1, Math.floor((camY + hh) / TILE) + 1);
-  const W = map.W, t = map.t;
+  const W = map.W, t = map.t, palette = ZONES[zoneForFloor(map.f) - 1];
   for (let ty = y0; ty <= y1; ty++) for (let tx = x0; tx <= x1; tx++) {
     const px = tx * TILE, py = ty * TILE;
     if (t[ty * W + tx]) {
       const h = thash(tx, ty);
-      ctx.fillStyle = FLOORC[h & 3]; ctx.fillRect(px, py, TILE - 1, TILE - 1);
-      if (h % 13 === 0) { ctx.strokeStyle = '#121016'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px + 6, py + 10 + (h >> 8) % 18); ctx.lineTo(px + 20, py + 18); ctx.lineTo(px + 31, py + 12 + (h >> 12) % 20); ctx.stroke(); }
-      else if (h % 17 === 0) { ctx.fillStyle = '#262130'; ctx.fillRect(px + 8 + (h >> 6) % 20, py + 8 + (h >> 10) % 20, 4, 3); }
+      ctx.fillStyle = palette.floor[h & 3]; ctx.fillRect(px, py, TILE - 1, TILE - 1);
+      if (h % 13 === 0) { ctx.strokeStyle = palette.front; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(px + 6, py + 10 + (h >> 8) % 18); ctx.lineTo(px + 20, py + 18); ctx.lineTo(px + 31, py + 12 + (h >> 12) % 20); ctx.stroke(); }
+      else if (h % 17 === 0) { ctx.fillStyle = palette.top; ctx.fillRect(px + 8 + (h >> 6) % 20, py + 8 + (h >> 10) % 20, 4, 3); }
     } else {
       const below = ty + 1 < map.H && t[(ty + 1) * W + tx];
       let near = below;
@@ -1281,11 +1316,11 @@ function drawTiles() {
         if (x >= 0 && y >= 0 && x < W && y < map.H && t[y * W + x]) { near = true; break; }
       }
       if (!near) continue;
-      ctx.fillStyle = '#2c2535'; ctx.fillRect(px, py, TILE, TILE);
+      ctx.fillStyle = palette.top; ctx.fillRect(px, py, TILE, TILE);
       if (below) {
-        ctx.fillStyle = '#17131c'; ctx.fillRect(px, py + TILE - 15, TILE, 15);
-        ctx.fillStyle = '#3e3449'; ctx.fillRect(px, py + TILE - 16, TILE, 2);
-        if (thash(tx, ty) % 5 === 0) { ctx.fillStyle = '#211b28'; ctx.fillRect(px + 12, py + TILE - 12, 2, 10); }
+        ctx.fillStyle = palette.front; ctx.fillRect(px, py + TILE - 15, TILE, 15);
+        ctx.fillStyle = palette.edge; ctx.fillRect(px, py + TILE - 16, TILE, 2);
+        if (thash(tx, ty) % 5 === 0) { ctx.fillStyle = palette.top; ctx.fillRect(px + 12, py + TILE - 12, 2, 10); }
       }
     }
   }
@@ -1311,6 +1346,7 @@ function drawChests() {
 }
 function drawHazards() {
   for (const h of hazards) {
+    if (h.cancelled) continue;
     const p = clamp(h.t / h.max, 0, 1);
     if (h.k === 'circle') {
       ctx.fillStyle = `rgba(229,72,77,${0.12 + 0.22 * p})`; ctx.beginPath(); ctx.arc(h.x, h.y, h.r * p, 0, TAU); ctx.fill();
@@ -1367,37 +1403,66 @@ function drawEnemy(e, t) {
     for (const s of [-1, 1]) { ctx.beginPath(); ctx.moveTo(e.x, e.y); ctx.lineTo(e.x + s * r * 2.1, e.y - r * (0.6 + f)); ctx.lineTo(e.x + s * r * 1.4, e.y + r * 0.5); ctx.closePath(); ctx.fill(); }
     ctx.fillStyle = W || '#e6dfd0'; ctx.beginPath(); ctx.arc(e.x, e.y, r * 0.65, 0, TAU); ctx.fill();
     eyes(e, '#d23b3b', 0.5, 0.3, 1.8);
+  } else if (T === 'beetle') {
+    const progress = e.fuse ? clamp(e.fuse.t / e.fuse.max, 0, 1) : 0;
+    const red = e.fuse && Math.floor(t / 85) % 2;
+    const size = r * (1 + 0.55 * progress);
+    ctx.save(); ctx.translate(e.x, e.y); ctx.rotate(e.ang); ctx.scale(size, size);
+    ctx.strokeStyle = W || '#433131'; ctx.lineWidth = 0.14;
+    ctx.beginPath();
+    for (const side of [-1, 1]) for (const x of [-0.43, 0, 0.43]) {
+      ctx.moveTo(x, side * 0.42); ctx.lineTo(x - 0.14, side * 0.89);
+    }
+    ctx.stroke();
+    ctx.fillStyle = W || (red ? '#b62d35' : '#201c22');
+    ctx.beginPath(); ctx.ellipse(0, 0, 0.96, 0.64, 0, 0, TAU); ctx.fill();
+    ctx.beginPath(); ctx.arc(0.8, 0, 0.36, 0, TAU); ctx.fill();
+    ctx.fillStyle = W || (red ? '#ff9b75' : '#bd343d');
+    for (const side of [-1, 1]) for (const x of [0.28, 0.57]) {
+      ctx.beginPath(); ctx.arc(x, side * 0.33, 0.12, 0, TAU); ctx.fill();
+    }
+    ctx.fillStyle = W || (red ? '#d34e3a' : '#785035');
+    ctx.beginPath(); ctx.ellipse(-0.35, -0.09, 0.46, 0.4, -0.2, 0, TAU); ctx.fill();
+    const sparkX = -1 + 0.25 * progress, sparkY = -0.58 + 0.2 * progress;
+    ctx.strokeStyle = '#d1a16a'; ctx.lineWidth = 0.09;
+    ctx.beginPath(); ctx.moveTo(-0.59, -0.26); ctx.lineTo(sparkX, sparkY); ctx.stroke();
+    ctx.fillStyle = Math.floor(t / 65) % 2 ? '#ffb054' : '#ff7040';
+    ctx.beginPath(); ctx.arc(sparkX, sparkY, 0.12 + 0.06 * Math.sin(t * 0.05), 0, TAU); ctx.fill();
+    ctx.restore();
   } else if (T === 'ghoul') {
     const lean = e.state === 'wind' ? 0.45 : 0.2;
     ctx.fillStyle = W || '#6d7a6b'; ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, TAU); ctx.fill();
     ctx.fillStyle = W || '#8a9887'; ctx.beginPath(); ctx.arc(e.x + Math.cos(e.ang) * r * lean * 2, e.y + Math.sin(e.ang) * r * lean * 2 - 3, r * 0.6, 0, TAU); ctx.fill();
     if (e.state === 'wind') { ctx.strokeStyle = '#ff7a6b'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(e.x, e.y, r + 10, e.ang - 0.8, e.ang + 0.8); ctx.stroke(); }
     eyes(e, '#ff4d4d', 0.4, 0.75, 2);
-  } else if (T === 'caster' || T === 'mother') {
+  } else if (T === 'caster' || T === 'mother' || T === 'archbishop') {
     const casting = e.state === 'cast' || e.state === 'seq';
-    ctx.fillStyle = W || (T === 'mother' ? '#4a3568' : '#56407a');
+    const pale = T === 'archbishop', glow = pale ? '#80c7ff' : '#c58bff';
+    ctx.fillStyle = W || (pale ? '#d6e2e5' : e.boss ? '#4a3568' : '#56407a');
     ctx.beginPath(); ctx.moveTo(e.x, e.y - r * 1.25); ctx.lineTo(e.x + r, e.y + r * 0.9); ctx.lineTo(e.x - r, e.y + r * 0.9); ctx.closePath(); ctx.fill();
     const g = ctx.createRadialGradient(e.x, e.y, 1, e.x, e.y, r * (casting ? 1.3 : 0.8));
-    g.addColorStop(0, '#f2dcff'); g.addColorStop(0.4, '#c58bff'); g.addColorStop(1, 'rgba(197,139,255,0)');
+    g.addColorStop(0, pale ? '#effbff' : '#f2dcff'); g.addColorStop(0.4, glow); g.addColorStop(1, glow + '00');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(e.x, e.y, r * (casting ? 1.3 : 0.8), 0, TAU); ctx.fill();
-    if (T === 'mother') for (let i = 0; i < 5; i++) { const a = t * 0.002 + TAU * i / 5; ctx.fillStyle = '#c58bff'; ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * r * 1.5, e.y + Math.sin(a) * r * 1.5, 5, 0, TAU); ctx.fill(); }
-  } else if (T === 'brute' || T === 'golem') {
+    if (e.boss) for (let i = 0; i < 5; i++) { const a = t * 0.002 + TAU * i / 5; ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(e.x + Math.cos(a) * r * 1.5, e.y + Math.sin(a) * r * 1.5, 5, 0, TAU); ctx.fill(); }
+  } else if (T === 'brute' || T === 'golem' || T === 'crab') {
     const pts = 9;
-    ctx.fillStyle = W || (T === 'golem' ? '#7a6a5c' : '#665a50');
+    const teal = T === 'crab';
+    ctx.fillStyle = W || (teal ? '#36655f' : e.boss ? '#7a6a5c' : '#665a50');
     ctx.beginPath();
     for (let i = 0; i < pts; i++) { const a = TAU * i / pts + 0.3, rr = r * (0.86 + ((i * 7) % 3) * 0.08); ctx.lineTo(e.x + Math.cos(a) * rr, e.y + Math.sin(a) * rr); }
     ctx.closePath(); ctx.fill();
-    ctx.strokeStyle = T === 'golem' ? '#ff9a4a' : '#3f362f'; ctx.lineWidth = T === 'golem' ? 2.5 : 2;
+    ctx.strokeStyle = teal ? '#79c4b2' : e.boss ? '#ff9a4a' : '#3f362f'; ctx.lineWidth = e.boss ? 2.5 : 2;
     ctx.beginPath(); ctx.moveTo(e.x - r * 0.5, e.y - r * 0.2); ctx.lineTo(e.x - r * 0.1, e.y + r * 0.1); ctx.lineTo(e.x + r * 0.3, e.y - r * 0.05); ctx.lineTo(e.x + r * 0.55, e.y + r * 0.35); ctx.stroke();
-    if (T === 'golem') for (let i = 0; i < 4; i++) { const a = -Math.PI / 2 + (i - 1.5) * 0.45; ctx.fillStyle = '#9c8a78'; ctx.beginPath(); ctx.moveTo(e.x + Math.cos(a - 0.12) * r * 0.9, e.y + Math.sin(a - 0.12) * r * 0.9); ctx.lineTo(e.x + Math.cos(a) * r * 1.3, e.y + Math.sin(a) * r * 1.3); ctx.lineTo(e.x + Math.cos(a + 0.12) * r * 0.9, e.y + Math.sin(a + 0.12) * r * 0.9); ctx.fill(); }
-    eyes(e, (e.state === 'aim' || e.state === 'rush') ? '#ff3b2f' : '#ffb054', 0.35, 0.6, T === 'golem' ? 4 : 2.6);
-  } else if (T === 'fallen') {
-    ctx.fillStyle = W || '#2a1f38'; ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, TAU); ctx.fill();
-    ctx.fillStyle = W || '#3b2c4f'; ctx.beginPath(); ctx.arc(e.x + Math.cos(e.ang) * 6, e.y + Math.sin(e.ang) * 6 - 4, r * 0.62, 0, TAU); ctx.fill();
+    if (e.boss) for (let i = 0; i < 4; i++) { const a = -Math.PI / 2 + (i - 1.5) * 0.45; ctx.fillStyle = teal ? '#568c83' : '#9c8a78'; ctx.beginPath(); ctx.moveTo(e.x + Math.cos(a - 0.12) * r * 0.9, e.y + Math.sin(a - 0.12) * r * 0.9); ctx.lineTo(e.x + Math.cos(a) * r * 1.3, e.y + Math.sin(a) * r * 1.3); ctx.lineTo(e.x + Math.cos(a + 0.12) * r * 0.9, e.y + Math.sin(a + 0.12) * r * 0.9); ctx.fill(); }
+    eyes(e, (e.state === 'aim' || e.state === 'rush') ? '#ff3b2f' : teal ? '#9ce5ce' : '#ffb054', 0.35, 0.6, e.boss ? 4 : 2.6);
+  } else if (T === 'fallen' || T === 'dark') {
+    const dark = T === 'dark';
+    ctx.fillStyle = W || (dark ? '#100b10' : '#2a1f38'); ctx.beginPath(); ctx.arc(e.x, e.y, r, 0, TAU); ctx.fill();
+    ctx.fillStyle = W || (dark ? '#2c1519' : '#3b2c4f'); ctx.beginPath(); ctx.arc(e.x + Math.cos(e.ang) * 6, e.y + Math.sin(e.ang) * 6 - 4, r * 0.62, 0, TAU); ctx.fill();
     const la = e.ang + 2.2, lx = e.x + Math.cos(la) * r * 1.1, ly = e.y + Math.sin(la) * r * 1.1;
     const g = ctx.createRadialGradient(lx, ly, 1, lx, ly, 26); g.addColorStop(0, '#ff6b6b'); g.addColorStop(1, 'rgba(255,60,60,0)');
     ctx.fillStyle = g; ctx.beginPath(); ctx.arc(lx, ly, 26, 0, TAU); ctx.fill();
-    ctx.strokeStyle = '#c9b9e0'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(e.x + Math.cos(e.ang) * r * 0.6, e.y + Math.sin(e.ang) * r * 0.6); ctx.lineTo(e.x + Math.cos(e.ang) * (r + 34), e.y + Math.sin(e.ang) * (r + 34)); ctx.stroke();
+    ctx.strokeStyle = dark ? '#c6414a' : '#c9b9e0'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(e.x + Math.cos(e.ang) * r * 0.6, e.y + Math.sin(e.ang) * r * 0.6); ctx.lineTo(e.x + Math.cos(e.ang) * (r + 34), e.y + Math.sin(e.ang) * (r + 34)); ctx.stroke();
     eyes(e, '#ff4d4d', 0.35, 0.7, 2.4);
   }
   if (!e.boss && e.hp < e.maxHp) {
