@@ -3,6 +3,8 @@
 毎朝その日のトランジット天体と出生図のアスペクトを計算して、LINEに届ける Google Apps Script（GAS）Bot。
 天文計算は外部APIを使わず、GAS単体で完結させる。
 
+> **別プロジェクト**: `game/`（ハクスラゲーム「灯守りの迷宮」）と `codex/`（Codex とのやり取り）は通知Botとは無関係。ゲームの作業は [`codex/LOOP.md`](codex/LOOP.md) の手順で進め、確認は `node game/test/play.js`。ゲームだけを触る作業では、下の「セッション開始時にやること」の 2・3（通知Botの検証）は省略してよい。
+
 ## セッション開始時にやること
 
 1. 前提ツールの確認: `node --version` と `python --version`（Windows。mac/Linux は `python3`）。どちらかが無ければユーザーに伝えて止まる
