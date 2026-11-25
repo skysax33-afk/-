@@ -1,0 +1,12 @@
+{
+  "name": "lantern-labyrinth-test",
+  "private": true,
+  "description": "灯守りの迷宮の自動プレイテスト（node play.js）",
+  "scripts": {
+    "test": "node play.js",
+    "shots": "node play.js --shots"
+  },
+  "devDependencies": {
+    "playwright": "^1.49.0"
+  }
+}
